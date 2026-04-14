@@ -6,11 +6,11 @@ FocusForge — macOS-приложение на Electron для фокус-сес
 
 Скачайте последнюю версию на странице [Releases](https://github.com/Crash1995/focus-tomato/releases).
 
-Файл для macOS называется `FocusForge-0.1.0-arm64.dmg`.
+Файл для macOS называется `FocusForge-0.1.0-mac.zip`.
 
 ## Установка
 
-1. Откройте скачанный `.dmg`.
+1. Распакуйте скачанный `.zip`.
 2. Перетащите `FocusForge` в папку `Applications`.
 3. Запустите `FocusForge` из `Applications`.
 

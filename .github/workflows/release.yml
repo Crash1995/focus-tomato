@@ -26,11 +26,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build DMG
-        run: npm run build:mac
+      - name: Build app
+        run: npx electron-builder --mac dir
+
+      - name: Archive app
+        run: |
+          APP_VERSION="${GITHUB_REF_NAME#v}"
+          ditto -c -k --keepParent dist/mac*/FocusForge.app "FocusForge-${APP_VERSION}-mac.zip"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/FocusForge-*.dmg
+          files: FocusForge-*-mac.zip
           generate_release_notes: true
