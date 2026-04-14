@@ -7,7 +7,6 @@ const { sendAIRequest } = require('./main/openRouterClient');
 
 let mainWindow = null;
 let dataStore = null;
-const isE2EMode = process.env.FOCUSFORGE_E2E === '1';
 
 app.setName('FocusForge');
 
@@ -38,18 +37,14 @@ function registerIPC() {
   ipcMain.handle('data:load', async () => dataStore.loadData());
   ipcMain.handle('data:save', async (_event, data) => dataStore.saveData(data));
   ipcMain.handle('ai:request', async (_event, sessions, apiKey) => {
-    if (isE2EMode && process.env.FOCUSFORGE_E2E_AI_RESPONSE) {
-      return process.env.FOCUSFORGE_E2E_AI_RESPONSE;
-    }
     return sendAIRequest({
       sessions,
-      apiKey: apiKey || process.env.OPENROUTER_API_KEY,
-      model: process.env.OPENROUTER_DEFAULT_MODEL || undefined
+      apiKey
     });
   });
   ipcMain.handle('openrouter:config', async () => ({
-    hasEnvAPIKey: Boolean(process.env.OPENROUTER_API_KEY),
-    defaultModel: process.env.OPENROUTER_DEFAULT_MODEL || 'openai/gpt-4o-mini'
+    hasEnvAPIKey: false,
+    defaultModel: 'openai/gpt-4o-mini'
   }));
   ipcMain.handle('image:save', async (_event, dataURL) => saveImage(dataURL));
   ipcMain.handle('clipboard:copy', async (_event, text) => {
@@ -70,12 +65,6 @@ function registerIPC() {
 }
 
 async function saveImage(dataURL) {
-  if (isE2EMode && process.env.FOCUSFORGE_E2E_SAVE_PATH) {
-    const base64Data = String(dataURL).replace(/^data:image\/png;base64,/, '');
-    await fs.writeFile(process.env.FOCUSFORGE_E2E_SAVE_PATH, Buffer.from(base64Data, 'base64'));
-    return { saved: true, filePath: process.env.FOCUSFORGE_E2E_SAVE_PATH };
-  }
-
   const result = await dialog.showSaveDialog(mainWindow, {
     title: 'Сохранить карточку',
     defaultPath: `FocusForge-${new Date().toISOString().slice(0, 10)}.png`,
