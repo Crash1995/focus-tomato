@@ -11,8 +11,6 @@
   },
   "scripts": {
     "start": "electron src/main.js",
-    "test": "node --test tests/*.test.js",
-    "test:ui": "node scripts/ui-smoke-test.js",
     "build:mac": "electron-builder --mac"
   },
   "dependencies": {
@@ -27,6 +25,13 @@
     "appId": "com.focusforge.app",
     "productName": "FocusForge",
     "electronDist": "node_modules/electron/dist",
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json",
+      "node_modules/html2canvas/dist/html2canvas.min.js",
+      "node_modules/canvas-confetti/dist/confetti.browser.js"
+    ],
     "mac": {
       "category": "public.app-category.productivity",
       "icon": "assets/icon.png",

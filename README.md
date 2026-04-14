@@ -44,19 +44,6 @@ OPENROUTER_DEFAULT_MODEL=anthropic/claude-sonnet-4.5 npm start
 
 Не коммитьте реальные ключи. Для примера используйте `.env.example`.
 
-## Тесты
-
-```bash
-npm test
-```
-
-UI smoke-test запускается против уже открытого приложения с включенным E2E-режимом:
-
-```bash
-FOCUSFORGE_E2E=1 FOCUSFORGE_E2E_AI_RESPONSE="Smoke summary" FOCUSFORGE_E2E_SAVE_PATH=/tmp/focusforge-smoke.png ./node_modules/.bin/electron --remote-debugging-port=9223 src/main.js
-npm run test:ui
-```
-
 ## Сборка macOS
 
 ```bash
