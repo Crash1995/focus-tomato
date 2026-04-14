@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FocusForge</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="titlebar">
+        <div class="window-controls">
+          <button class="traffic traffic-close" id="closeWindow" aria-label="Закрыть"></button>
+          <button class="traffic traffic-minimize" id="minimizeWindow" aria-label="Свернуть"></button>
+          <span class="traffic traffic-disabled"></span>
+        </div>
+        <strong>FocusForge</strong>
+        <button class="icon-button" id="settingsButton" aria-label="Настройки">⚙</button>
+      </header>
+
+      <main class="columns">
+        <section class="timer-column">
+          <div class="timer-ring">
+            <svg viewBox="0 0 220 220" aria-hidden="true">
+              <circle class="ring-bg" cx="110" cy="110" r="96"></circle>
+              <circle class="ring-progress" id="timerProgress" cx="110" cy="110" r="96"></circle>
+            </svg>
+            <div class="timer-time" id="timerTime">25:00</div>
+          </div>
+          <div class="mode-label">
+            <span class="mode-dot" id="modeDot"></span>
+            <span id="modeText">Работа</span>
+          </div>
+          <div class="timer-actions">
+            <button class="primary-button" id="startPauseButton">Старт</button>
+            <button class="secondary-button" id="resetButton">Сброс</button>
+          </div>
+        </section>
+
+        <section class="sessions-column" id="centerPanel">
+          <div class="panel-header">
+            <h1>Сегодня</h1>
+          </div>
+          <div class="session-list" id="sessionList"></div>
+          <button class="primary-button day-summary-button hidden" id="summaryButton">Итоги дня ✨</button>
+        </section>
+
+        <aside class="stats-column">
+          <div class="level-block">
+            <div class="level-number" id="levelNumber">Lvl 1</div>
+            <div class="level-name" id="levelName">Новичок</div>
+          </div>
+          <div class="xp-progress">
+            <div class="bar">
+              <div class="bar-fill" id="xpBarFill"></div>
+            </div>
+            <p id="xpProgressText">0 / 100 XP до Lvl 2</p>
+          </div>
+          <p id="streakText">🔥 0 дней</p>
+          <p id="todaySessionsText">Сессий: 0</p>
+          <p id="totalXPText">Всего XP: 0</p>
+        </aside>
+      </main>
+    </div>
+
+    <div class="modal-root hidden" id="sessionModal">
+      <div class="modal">
+        <h2 id="sessionModalTitle">Сессия завершена!</h2>
+        <input id="sessionDescription" maxlength="140" placeholder="Что сделал?">
+        <div class="xp-float" id="sessionXpPreview">+25 XP</div>
+        <div class="modal-actions">
+          <button class="secondary-button" id="skipSessionButton">Пропустить</button>
+          <button class="primary-button" id="saveSessionButton">Готово</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-root hidden" id="apiKeyModal">
+      <div class="modal modal-wide">
+        <h2>Для AI-отчёта нужен ключ OpenRouter</h2>
+        <button class="link-button" id="openRouterLink">Получить бесплатно → openrouter.ai/keys</button>
+        <input id="apiKeyInput" type="password" placeholder="sk-or-...">
+        <div class="modal-actions">
+          <button class="secondary-button" id="cancelApiKeyButton">Отмена</button>
+          <button class="primary-button" id="saveApiKeyButton">Сохранить</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-root hidden" id="settingsModal">
+      <div class="modal modal-wide">
+        <h2>Настройки</h2>
+        <label>Длительность работы</label>
+        <div class="segmented" id="workDurationOptions"></div>
+        <label>Длительность отдыха</label>
+        <div class="segmented" id="breakDurationOptions"></div>
+        <label>API ключ</label>
+        <div class="key-row">
+          <input id="settingsApiKey" type="password" placeholder="sk-or-...">
+          <button class="secondary-button" id="toggleKeyButton">Показать</button>
+        </div>
+        <div class="modal-actions">
+          <button class="secondary-button" id="deleteKeyButton">Удалить ключ</button>
+          <button class="secondary-button" id="cancelSettingsButton">Отмена</button>
+          <button class="primary-button" id="saveSettingsButton">Сохранить</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="level-up hidden" id="levelUpOverlay">
+      <canvas id="confettiCanvas"></canvas>
+      <div id="levelUpText">Level Up!</div>
+    </div>
+
+    <div class="toast hidden" id="toast"></div>
+
+    <script src="../node_modules/html2canvas/dist/html2canvas.min.js"></script>
+    <script src="../node_modules/canvas-confetti/dist/confetti.browser.js"></script>
+    <script src="./core/gamification.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
