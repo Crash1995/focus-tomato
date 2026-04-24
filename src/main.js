@@ -37,11 +37,8 @@ function createMainWindow() {
 function registerIPC() {
   ipcMain.handle('data:load', async () => dataStore.loadData());
   ipcMain.handle('data:save', async (_event, data) => dataStore.saveData(data));
-  ipcMain.handle('ai:request', async (_event, sessions, apiKey) => {
-    return sendAIRequest({
-      sessions,
-      apiKey
-    });
+  ipcMain.handle('ai:request', async (_event, closedTasks, pomodoroCount, apiKey) => {
+    return sendAIRequest({ closedTasks, pomodoroCount, apiKey });
   });
   ipcMain.handle('openrouter:config', async () => ({
     hasEnvAPIKey: false,

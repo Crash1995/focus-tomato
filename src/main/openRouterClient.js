@@ -6,14 +6,14 @@ class AIRequestError extends Error {
   }
 }
 
-async function sendAIRequest({ sessions, apiKey, model = 'openai/gpt-4o-mini', fetchImpl = fetch }) {
+async function sendAIRequest({ closedTasks, pomodoroCount, apiKey, model = 'openai/gpt-4o-mini', fetchImpl = fetch }) {
   const response = await fetchImpl('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
-    body: JSON.stringify(buildRequestBody(sessions, model))
+    body: JSON.stringify(buildRequestBody(closedTasks, pomodoroCount, model))
   }).catch((error) => {
     const networkCode = error?.code || error?.cause?.code;
     if (['ENOTFOUND', 'ECONNREFUSED', 'ETIMEDOUT', 'ENETDOWN'].includes(networkCode)) {
@@ -25,7 +25,6 @@ async function sendAIRequest({ sessions, apiKey, model = 'openai/gpt-4o-mini', f
   if (response.status === 401) {
     throw new AIRequestError('Неверный API ключ. Проверь на openrouter.ai/keys', 'invalid-key');
   }
-
   if (!response.ok) {
     throw new AIRequestError('Что-то пошло не так. Попробуй ещё раз', 'unknown');
   }
@@ -38,35 +37,35 @@ async function sendAIRequest({ sessions, apiKey, model = 'openai/gpt-4o-mini', f
   return content;
 }
 
-function buildRequestBody(sessions, model = 'openai/gpt-4o-mini') {
+function buildRequestBody(closedTasks, pomodoroCount, model = 'openai/gpt-4o-mini') {
   return {
     model,
     messages: [
       {
         role: 'system',
         content: [
-          'Ты — продуктивити-коуч. Получаешь список рабочих сессий пользователя за день',
-          '(25-минутные блоки помодоро). Напиши краткий энергичный отчёт:',
+          'Ты — продуктивити-коуч. Получаешь список задач пользователя, закрытых за день,',
+          'и количество помидоров (25-минутных фокус-сессий). Напиши краткий энергичный отчёт:',
           '1) Главное достижение дня (1 предложение)',
-          '2) Паттерн в работе — что заметил (1-2 предложения)',
+          '2) Паттерн в работе — что заметил по списку задач (1-2 предложения)',
           '3) Совет на завтра (1 предложение)',
           'Русский язык, дружелюбно, энергично, без воды. Максимум 5 предложений.'
         ].join('\n')
       },
       {
         role: 'user',
-        content: `Мои сессии за сегодня:\n${formatSessions(sessions)}`
+        content: `Закрыто задач: ${closedTasks.length}. Помидоров: ${pomodoroCount}.\nСписок:\n${formatTasks(closedTasks)}`
       }
     ]
   };
 }
 
-function formatSessions(sessions) {
-  return sessions
-    .map((session) => {
-      const description = String(session.description || '').trim() || 'без описания';
-      return `${session.time} — ${description}`;
-    })
+function formatTasks(closedTasks) {
+  if (!closedTasks.length) {
+    return '(пусто)';
+  }
+  return closedTasks
+    .map((task) => `— ${String(task.title || '').trim() || 'без названия'}`)
     .join('\n');
 }
 
@@ -74,5 +73,5 @@ module.exports = {
   AIRequestError,
   sendAIRequest,
   buildRequestBody,
-  formatSessions
+  formatTasks
 };
