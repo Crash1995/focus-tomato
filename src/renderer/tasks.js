@@ -42,9 +42,81 @@
     return result;
   }
 
+  function createTask(title, date, order, done = false) {
+    const createdAt = Date.now();
+    const random = Math.random().toString(36).slice(2, 8);
+    return {
+      id: `t-${createdAt}-${random}`,
+      date,
+      title: String(title).slice(0, MAX_TITLE_LENGTH),
+      done: Boolean(done),
+      order,
+      createdAt,
+      completedAt: done ? createdAt : null
+    };
+  }
+
+  function toggleTask(tasks, id) {
+    return tasks.map((task) => {
+      if (task.id !== id) {
+        return task;
+      }
+      const nextDone = !task.done;
+      return {
+        ...task,
+        done: nextDone,
+        completedAt: nextDone ? Date.now() : null
+      };
+    });
+  }
+
+  function reorderTasks(tasks, draggedId, targetId) {
+    const dragged = tasks.find((t) => t.id === draggedId);
+    const target = tasks.find((t) => t.id === targetId);
+    if (!dragged || !target || dragged.date !== target.date) {
+      return tasks;
+    }
+    const date = dragged.date;
+    const sameDay = tasks
+      .filter((t) => t.date === date)
+      .sort((a, b) => a.order - b.order);
+    const withoutDragged = sameDay.filter((t) => t.id !== draggedId);
+    const targetIndex = withoutDragged.findIndex((t) => t.id === targetId);
+    withoutDragged.splice(targetIndex, 0, dragged);
+    const renumbered = withoutDragged.map((t, index) => ({ ...t, order: index }));
+    const result = [];
+    let sameDayCursor = 0;
+    for (const t of tasks) {
+      if (t.date === date) {
+        result.push(renumbered[sameDayCursor]);
+        sameDayCursor += 1;
+      } else {
+        result.push(t);
+      }
+    }
+    return result;
+  }
+
+  function getOpenTodayTasks(tasks, date) {
+    return tasks
+      .filter((t) => t.date === date && !t.done)
+      .sort((a, b) => a.order - b.order);
+  }
+
+  function getDoneTodayTasks(tasks, date) {
+    return tasks
+      .filter((t) => t.date === date && t.done)
+      .sort((a, b) => (b.completedAt || 0) - (a.completedAt || 0));
+  }
+
   return {
     MAX_TITLE_LENGTH,
     MAX_PARSED_ROWS,
-    parseTaskInput
+    parseTaskInput,
+    createTask,
+    toggleTask,
+    reorderTasks,
+    getOpenTodayTasks,
+    getDoneTodayTasks
   };
 });
