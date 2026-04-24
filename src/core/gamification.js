@@ -7,8 +7,7 @@
     root.FocusForgeCore = api;
   }
 })(typeof window !== 'undefined' ? window : globalThis, function createGamification() {
-  const BASE_SESSION_XP = 25;
-  const DESCRIPTION_BONUS_XP = 10;
+  const TASK_XP = 25;
   const PRODUCTIVE_DAY_SESSIONS = 4;
 
   const LEVELS = [
@@ -19,9 +18,9 @@
     { level: 5, name: 'Легенда', xpFrom: 1000 }
   ];
 
-function calculateSessionXP(description) {
-  const hasDescription = String(description || '').trim().length > 0;
-  return BASE_SESSION_XP + (hasDescription ? DESCRIPTION_BONUS_XP : 0);
+function applyTaskToggleXP(totalXP, nextDone) {
+  const delta = nextDone ? TASK_XP : -TASK_XP;
+  return Math.max(0, totalXP + delta);
 }
 
 function getLevel(totalXP) {
@@ -98,11 +97,10 @@ function formatDateKey(date) {
 }
 
   return {
-    BASE_SESSION_XP,
-    DESCRIPTION_BONUS_XP,
+    TASK_XP,
     PRODUCTIVE_DAY_SESSIONS,
     LEVELS,
-    calculateSessionXP,
+    applyTaskToggleXP,
     getLevel,
     getLevelProgress,
     getTodaySessions,
