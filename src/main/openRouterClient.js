@@ -7,6 +7,12 @@ class AIRequestError extends Error {
 }
 
 async function sendAIRequest({ closedTasks, pomodoroCount, apiKey, model = 'openai/gpt-4o-mini', fetchImpl = fetch }) {
+  // Защита от stale-вызовов: старый caller передавал (sessions, apiKey) и
+  // apiKey оказался бы в `pomodoroCount`, улетев в prompt OpenRouter'у.
+  if (!Array.isArray(closedTasks) || typeof pomodoroCount !== 'number') {
+    throw new AIRequestError('Неверный формат запроса', 'invalid-request');
+  }
+
   const response = await fetchImpl('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
