@@ -18,9 +18,13 @@ let timer = null;
 let mode = 'work';
 let isRunning = false;
 let remainingSeconds = 25 * 60;
+let endTime = 0;
 let selectedWorkDuration = 25;
 let selectedBreakDuration = 5;
 let aiReportText = '';
+let isSummaryInFlight = false;
+let audioContext = null;
+let audioCompressor = null;
 let openRouterConfig = {
   hasEnvAPIKey: false,
   defaultModel: 'openai/gpt-4o-mini'
@@ -35,7 +39,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   data = await window.api.loadData();
   selectedWorkDuration = data.settings.workDuration;
   selectedBreakDuration = data.settings.breakDuration;
-  updateStreakOnLaunch();
+  await updateStreakOnLaunch();
   resetTimer();
   render();
 });
@@ -83,6 +87,8 @@ function startTimer() {
     return;
   }
   isRunning = true;
+  ensureAudioReady();
+  endTime = Date.now() + remainingSeconds * 1000;
   timer = setInterval(tickTimer, 1000);
   updateDockBadge();
   renderTimer();
@@ -92,6 +98,7 @@ function pauseTimer() {
   clearInterval(timer);
   timer = null;
   isRunning = false;
+  endTime = 0;
   window.api.setDockBadge('');
   renderTimer();
 }
@@ -103,7 +110,7 @@ function resetTimer() {
 }
 
 function tickTimer() {
-  remainingSeconds = Math.max(0, remainingSeconds - 1);
+  remainingSeconds = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
   updateDockBadge();
   renderTimer();
 
@@ -158,15 +165,18 @@ async function saveCompletedSession(description) {
   render();
 }
 
-function updateStreakOnLaunch() {
+async function updateStreakOnLaunch() {
   const nextStats = updateStreak(data.stats, data.sessions, getToday());
   if (JSON.stringify(nextStats) !== JSON.stringify(data.stats)) {
     data.stats = nextStats;
-    saveData();
+    await saveData();
   }
 }
 
 async function requestSummary() {
+  if (isSummaryInFlight) {
+    return;
+  }
   const todaySessions = getTodaySessions(data.sessions, getToday());
   if (todaySessions.length < 2) {
     return;
@@ -177,6 +187,7 @@ async function requestSummary() {
     return;
   }
 
+  isSummaryInFlight = true;
   renderSummaryLoading();
 
   try {
@@ -184,6 +195,8 @@ async function requestSummary() {
     renderSummaryCard();
   } catch (error) {
     renderSummaryError(error.message || 'Что-то пошло не так. Попробуй ещё раз');
+  } finally {
+    isSummaryInFlight = false;
   }
 }
 
@@ -470,18 +483,68 @@ function getDisplayDate() {
   }).format(new Date());
 }
 
+const WORK_END_NOTES = [523.25, 659.25, 783.99];
+const BREAK_END_NOTES = [783.99, 659.25, 523.25];
+const NOTE_STRIDE_SECONDS = 0.22;
+const NOTE_DECAY_SECONDS = 0.85;
+const NOTE_PEAK_GAIN = 0.95;
+const CHIME_REPEAT_COUNT = 3;
+const CHIME_REPEAT_GAP_SECONDS = 0.3;
+
+function ensureAudioReady() {
+  if (!audioContext) {
+    audioContext = new AudioContext();
+    audioCompressor = audioContext.createDynamicsCompressor();
+    audioCompressor.threshold.value = -10;
+    audioCompressor.knee.value = 8;
+    audioCompressor.ratio.value = 4;
+    audioCompressor.attack.value = 0.003;
+    audioCompressor.release.value = 0.1;
+    audioCompressor.connect(audioContext.destination);
+  }
+  if (audioContext.state === 'suspended') {
+    audioContext.resume();
+  }
+}
+
 function playBeep() {
-  const audioContext = new AudioContext();
-  const oscillator = audioContext.createOscillator();
-  const gain = audioContext.createGain();
-  oscillator.connect(gain);
-  gain.connect(audioContext.destination);
-  oscillator.frequency.value = mode === 'work' ? 880 : 660;
-  gain.gain.setValueAtTime(0.0001, audioContext.currentTime);
-  gain.gain.exponentialRampToValueAtTime(0.18, audioContext.currentTime + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.32);
-  oscillator.start();
-  oscillator.stop(audioContext.currentTime + 0.34);
+  ensureAudioReady();
+  const notes = mode === 'work' ? WORK_END_NOTES : BREAK_END_NOTES;
+  const cycleDuration = notes.length * NOTE_STRIDE_SECONDS + CHIME_REPEAT_GAP_SECONDS;
+  for (let cycle = 0; cycle < CHIME_REPEAT_COUNT; cycle += 1) {
+    const cycleStart = audioContext.currentTime + cycle * cycleDuration;
+    for (let index = 0; index < notes.length; index += 1) {
+      playBellNote(notes[index], cycleStart + index * NOTE_STRIDE_SECONDS);
+    }
+  }
+}
+
+function playBellNote(frequency, startAt) {
+  const fundamental = audioContext.createOscillator();
+  const overtone = audioContext.createOscillator();
+  const fundamentalGain = audioContext.createGain();
+  const overtoneGain = audioContext.createGain();
+  const envelope = audioContext.createGain();
+
+  fundamental.type = 'sine';
+  overtone.type = 'sine';
+  fundamental.frequency.value = frequency;
+  overtone.frequency.value = frequency * 2;
+  fundamentalGain.gain.value = 0.75;
+  overtoneGain.gain.value = 0.25;
+
+  fundamental.connect(fundamentalGain).connect(envelope);
+  overtone.connect(overtoneGain).connect(envelope);
+  envelope.connect(audioCompressor);
+
+  envelope.gain.setValueAtTime(0.0001, startAt);
+  envelope.gain.exponentialRampToValueAtTime(NOTE_PEAK_GAIN, startAt + 0.015);
+  envelope.gain.exponentialRampToValueAtTime(0.0001, startAt + NOTE_DECAY_SECONDS);
+
+  fundamental.start(startAt);
+  overtone.start(startAt);
+  fundamental.stop(startAt + NOTE_DECAY_SECONDS + 0.05);
+  overtone.stop(startAt + NOTE_DECAY_SECONDS + 0.05);
 }
 
 function escapeHTML(value) {
