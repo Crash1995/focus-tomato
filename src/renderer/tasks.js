@@ -70,6 +70,11 @@
     });
   }
 
+  // Инвариант: одно-дневные задачи занимают свои же исходные позиции в outer
+  // массиве, но в новом порядке (и с перенумерованным order 0..n). Задачи
+  // других дней — неподвижны. Не сводить к `tasks.map((t) => byId.get(t.id) || t)`
+  // — этот вариант сохраняет позиции same-day задач нетронутыми и ломает
+  // drag-intuition + тесты.
   function reorderTasks(tasks, draggedId, targetId) {
     const dragged = tasks.find((t) => t.id === draggedId);
     const target = tasks.find((t) => t.id === targetId);
