@@ -4,6 +4,7 @@ const path = require('node:path');
 function createDefaultData() {
   return {
     sessions: [],
+    tasks: [],
     stats: {
       totalXP: 0,
       level: 1,
@@ -59,6 +60,7 @@ function mergeWithDefaults(data) {
     ...defaultData,
     ...data,
     sessions: Array.isArray(data.sessions) ? data.sessions : [],
+    tasks: Array.isArray(data.tasks) ? data.tasks : [],
     stats: {
       ...defaultData.stats,
       ...(data.stats || {})
