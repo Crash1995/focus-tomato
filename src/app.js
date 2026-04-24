@@ -1,17 +1,31 @@
 const {
-  calculateSessionXP,
+  applyTaskToggleXP,
   getLevel,
   getLevelProgress,
   getTodaySessions,
   updateStreak,
-  buildShareText,
   formatDateKey
 } = window.FocusForgeCore;
+
+const {
+  parseTaskInput,
+  createTask,
+  toggleTask,
+  reorderTasks,
+  getOpenTodayTasks,
+  getDoneTodayTasks
+} = window.FocusForgeTasks;
+
+const {
+  getHistoryDays
+} = window.FocusForgeHistory;
 
 const TIMER_RADIUS = 96;
 const TIMER_CIRCUMFERENCE = 2 * Math.PI * TIMER_RADIUS;
 const WORK_DURATIONS = [15, 25, 45];
 const BREAK_DURATIONS = [5, 10, 15];
+const HISTORY_DAYS = 14;
+const MIDNIGHT_POLL_INTERVAL_MS = 30_000;
 
 let data = null;
 let timer = null;
@@ -21,8 +35,11 @@ let remainingSeconds = 25 * 60;
 let endTime = 0;
 let selectedWorkDuration = 25;
 let selectedBreakDuration = 5;
-let aiReportText = '';
-let isSummaryInFlight = false;
+let activeTab = 'open';
+let draggedTaskId = null;
+let todayDate = '';
+let midnightPoller = null;
+let historyAICache = '';
 let audioContext = null;
 let audioCompressor = null;
 let openRouterConfig = {
@@ -39,6 +56,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   data = await window.api.loadData();
   selectedWorkDuration = data.settings.workDuration;
   selectedBreakDuration = data.settings.breakDuration;
+  todayDate = getToday();
+  startMidnightPoller();
   await updateStreakOnLaunch();
   resetTimer();
   render();
@@ -57,12 +76,6 @@ function bindEvents() {
   elements.settingsButton.addEventListener('click', openSettings);
   elements.startPauseButton.addEventListener('click', toggleTimer);
   elements.resetButton.addEventListener('click', resetTimer);
-  elements.summaryButton.addEventListener('click', requestSummary);
-  elements.sessionDescription.addEventListener('input', updateSessionXPPreview);
-  elements.skipSessionButton.addEventListener('click', () => saveCompletedSession(''));
-  elements.saveSessionButton.addEventListener('click', () => {
-    saveCompletedSession(elements.sessionDescription.value);
-  });
   elements.openRouterLink.addEventListener('click', () => {
     window.api.openExternal('https://openrouter.ai/keys');
   });
@@ -72,6 +85,14 @@ function bindEvents() {
   elements.saveSettingsButton.addEventListener('click', saveSettings);
   elements.deleteKeyButton.addEventListener('click', deleteApiKey);
   elements.toggleKeyButton.addEventListener('click', toggleApiKeyVisibility);
+  elements.tabOpen.addEventListener('click', () => { activeTab = 'open'; renderTasks(); });
+  elements.tabDone.addEventListener('click', () => { activeTab = 'done'; renderTasks(); });
+  elements.tasksBulkSubmit.addEventListener('click', onBulkSubmit);
+  elements.tasksInlineInput.addEventListener('keydown', onInlineKeydown);
+  elements.openHistoryButton.addEventListener('click', openHistory);
+  elements.historyCloseButton.addEventListener('click', closeHistory);
+  elements.pomodoroAgainButton.addEventListener('click', onPomodoroAgain);
+  elements.pomodoroBreakButton.addEventListener('click', onPomodoroBreak);
 }
 
 function toggleTimer() {
@@ -110,6 +131,9 @@ function resetTimer() {
 }
 
 function tickTimer() {
+  if (!isRunning) {
+    return;
+  }
   remainingSeconds = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
   updateDockBadge();
   renderTimer();
@@ -124,10 +148,8 @@ function finishCurrentMode() {
   playBeep();
 
   if (mode === 'work') {
-    elements.sessionDescription.value = '';
-    updateSessionXPPreview();
-    elements.sessionModalTitle.textContent = `Сессия #${getTodaySessions(data.sessions, getToday()).length + 1} завершена! 🎉`;
-    showModal(elements.sessionModal);
+    recordPomodoroSession();
+    showModal(elements.pomodoroDoneModal);
     return;
   }
 
@@ -136,29 +158,26 @@ function finishCurrentMode() {
   renderTimer();
 }
 
-async function saveCompletedSession(description) {
-  const trimmedDescription = String(description || '').trim();
-  const xp = calculateSessionXP(trimmedDescription);
-  const oldLevel = getLevel(data.stats.totalXP);
-
-  data.sessions.unshift({
-    date: getToday(),
+function recordPomodoroSession() {
+  const session = {
+    date: todayDate,
     time: getCurrentTime(),
-    description: trimmedDescription,
-    xp
-  });
-  data.stats.totalXP += xp;
-  data.stats.level = getLevel(data.stats.totalXP).level;
-  await saveData();
+    xp: 0
+  };
+  data.sessions.unshift(session);
+  saveData();
+}
 
-  hideModal(elements.sessionModal);
-  showToast(`+${xp} XP`);
+async function onPomodoroAgain() {
+  hideModal(elements.pomodoroDoneModal);
+  mode = 'work';
+  remainingSeconds = getModeDurationSeconds();
+  renderTimer();
+  startTimer();
+}
 
-  const newLevel = getLevel(data.stats.totalXP);
-  if (newLevel.level > oldLevel.level) {
-    showLevelUp(newLevel.name);
-  }
-
+async function onPomodoroBreak() {
+  hideModal(elements.pomodoroDoneModal);
   mode = 'break';
   remainingSeconds = getModeDurationSeconds();
   startTimer();
@@ -173,33 +192,6 @@ async function updateStreakOnLaunch() {
   }
 }
 
-async function requestSummary() {
-  if (isSummaryInFlight) {
-    return;
-  }
-  const todaySessions = getTodaySessions(data.sessions, getToday());
-  if (todaySessions.length < 2) {
-    return;
-  }
-
-  if (!data.settings.apiKey && !openRouterConfig.hasEnvAPIKey) {
-    showModal(elements.apiKeyModal);
-    return;
-  }
-
-  isSummaryInFlight = true;
-  renderSummaryLoading();
-
-  try {
-    aiReportText = await window.api.sendAIRequest([...todaySessions].reverse(), data.settings.apiKey);
-    renderSummaryCard();
-  } catch (error) {
-    renderSummaryError(error.message || 'Что-то пошло не так. Попробуй ещё раз');
-  } finally {
-    isSummaryInFlight = false;
-  }
-}
-
 async function saveApiKeyAndContinue() {
   const apiKey = elements.apiKeyInput.value.trim();
   if (!apiKey) {
@@ -208,7 +200,9 @@ async function saveApiKeyAndContinue() {
   data.settings.apiKey = apiKey;
   await saveData();
   hideModal(elements.apiKeyModal);
-  requestSummary();
+  if (!elements.historyOverlay.classList.contains('hidden')) {
+    onHistoryAIClick();
+  }
 }
 
 function openSettings() {
@@ -248,7 +242,7 @@ function toggleApiKeyVisibility() {
 
 function render() {
   renderTimer();
-  renderSessions();
+  renderTasks();
   renderStats();
 }
 
@@ -264,28 +258,172 @@ function renderTimer() {
   elements.timerProgress.style.strokeDashoffset = String(TIMER_CIRCUMFERENCE * (1 - progress));
 }
 
-function renderSessions() {
-  const todaySessions = getTodaySessions(data.sessions, getToday());
-  elements.sessionList.innerHTML = '';
+function renderTasks() {
+  const open = getOpenTodayTasks(data.tasks, todayDate);
+  const done = getDoneTodayTasks(data.tasks, todayDate);
 
-  if (todaySessions.length === 0) {
-    elements.sessionList.innerHTML = '<div class="empty-state">Ни одной сессии. Жми Старт и начинай</div>';
+  elements.tabOpenCount.textContent = `${done.length}/${open.length + done.length}`;
+  elements.tabDoneCount.textContent = String(done.length);
+
+  elements.tabOpen.classList.toggle('is-active', activeTab === 'open');
+  elements.tabDone.classList.toggle('is-active', activeTab === 'done');
+  elements.tasksOpenView.classList.toggle('hidden', activeTab !== 'open');
+  elements.tasksDoneView.classList.toggle('hidden', activeTab !== 'done');
+
+  if (activeTab === 'open') {
+    renderOpenList(open);
   } else {
-    for (const session of todaySessions) {
-      const card = document.createElement('article');
-      card.className = 'session-card';
-      card.innerHTML = `
-        <div class="session-meta">
-          <span>${escapeHTML(session.time)}</span>
-          <span class="session-xp">+${session.xp} XP</span>
-        </div>
-        <div>${escapeHTML(session.description || 'без описания')}</div>
-      `;
-      elements.sessionList.appendChild(card);
-    }
+    renderDoneList(done);
   }
+}
 
-  elements.summaryButton.classList.toggle('hidden', todaySessions.length < 2);
+function renderOpenList(open) {
+  const hasAny = open.length > 0;
+  elements.tasksEmpty.classList.toggle('hidden', hasAny);
+  elements.tasksList.classList.toggle('hidden', !hasAny);
+  elements.tasksInlineRow.classList.toggle('hidden', !hasAny);
+  elements.tasksList.innerHTML = '';
+  for (const task of open) {
+    elements.tasksList.appendChild(buildTaskRow(task, true));
+  }
+}
+
+function renderDoneList(done) {
+  elements.tasksDoneList.innerHTML = '';
+  if (!done.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'Пока ничего не закрыто';
+    elements.tasksDoneList.appendChild(empty);
+    return;
+  }
+  for (const task of done) {
+    elements.tasksDoneList.appendChild(buildTaskRow(task, false));
+  }
+}
+
+function buildTaskRow(task, draggable) {
+  const row = document.createElement('div');
+  row.className = `task-row ${task.done ? 'is-done' : ''}`;
+  row.dataset.taskId = task.id;
+  if (draggable) {
+    row.draggable = true;
+  }
+  row.innerHTML = `
+    <div class="checkbox">${task.done ? '✓' : ''}</div>
+    <div class="title">${escapeHTML(task.title)}</div>
+    ${draggable ? '<span class="grip">⋮⋮</span>' : ''}
+  `;
+  row.querySelector('.checkbox').addEventListener('click', () => onTaskCheckboxClick(task.id, row));
+  if (draggable) {
+    row.addEventListener('dragstart', (event) => onTaskDragStart(event, task.id, row));
+    row.addEventListener('dragover', (event) => onTaskDragOver(event, row));
+    row.addEventListener('dragleave', () => row.classList.remove('is-drop-target'));
+    row.addEventListener('drop', (event) => onTaskDrop(event, task.id, row));
+    row.addEventListener('dragend', () => onTaskDragEnd(row));
+  }
+  return row;
+}
+
+async function onBulkSubmit() {
+  const raw = elements.tasksBulkInput.value;
+  const parsed = parseTaskInput(raw);
+  if (!parsed.length) {
+    return;
+  }
+  let order = 0;
+  for (const row of parsed) {
+    const task = createTask(row.title, todayDate, order, row.done);
+    data.tasks.push(task);
+    if (row.done) {
+      data.stats.totalXP = applyTaskToggleXP(data.stats.totalXP, true);
+    }
+    order += 1;
+  }
+  elements.tasksBulkInput.value = '';
+  await saveData();
+  render();
+}
+
+async function onInlineKeydown(event) {
+  if (event.key !== 'Enter') {
+    return;
+  }
+  event.preventDefault();
+  const raw = elements.tasksInlineInput.value;
+  const parsed = parseTaskInput(raw);
+  if (!parsed.length) {
+    return;
+  }
+  const existing = getOpenTodayTasks(data.tasks, todayDate);
+  let order = existing.length;
+  for (const row of parsed) {
+    const task = createTask(row.title, todayDate, order, row.done);
+    data.tasks.push(task);
+    if (row.done) {
+      data.stats.totalXP = applyTaskToggleXP(data.stats.totalXP, true);
+    }
+    order += 1;
+  }
+  elements.tasksInlineInput.value = '';
+  await saveData();
+  render();
+}
+
+async function onTaskCheckboxClick(taskId, rowElement) {
+  const task = data.tasks.find((t) => t.id === taskId);
+  if (!task) {
+    return;
+  }
+  const oldLevel = getLevel(data.stats.totalXP);
+  const nextDone = !task.done;
+  data.stats.totalXP = applyTaskToggleXP(data.stats.totalXP, nextDone);
+  data.tasks = toggleTask(data.tasks, taskId);
+
+  rowElement.classList.add('is-leaving');
+  await saveData();
+
+  setTimeout(() => {
+    render();
+    showToast(nextDone ? '+25 XP' : '−25 XP');
+    const newLevel = getLevel(data.stats.totalXP);
+    if (newLevel.level > oldLevel.level) {
+      showLevelUp(newLevel.name);
+    }
+  }, 200);
+}
+
+function onTaskDragStart(event, taskId, row) {
+  draggedTaskId = taskId;
+  row.classList.add('is-dragging');
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', taskId);
+}
+
+function onTaskDragOver(event, row) {
+  event.preventDefault();
+  event.dataTransfer.dropEffect = 'move';
+  if (row.dataset.taskId !== draggedTaskId) {
+    row.classList.add('is-drop-target');
+  }
+}
+
+async function onTaskDrop(event, targetId, row) {
+  event.preventDefault();
+  row.classList.remove('is-drop-target');
+  if (!draggedTaskId || draggedTaskId === targetId) {
+    return;
+  }
+  data.tasks = reorderTasks(data.tasks, draggedTaskId, targetId);
+  await saveData();
+  render();
+}
+
+function onTaskDragEnd(row) {
+  row.classList.remove('is-dragging');
+  row.classList.remove('is-drop-target');
+  draggedTaskId = null;
+  document.querySelectorAll('.task-row.is-drop-target').forEach((el) => el.classList.remove('is-drop-target'));
 }
 
 function renderStats() {
@@ -329,93 +467,164 @@ function renderSegmentedOptions(container, values, selectedValue, onSelect) {
   }
 }
 
-function renderSummaryLoading() {
-  elements.centerPanel.innerHTML = `
-    <div class="panel-header"><h1>Итоги дня</h1></div>
-    <div class="loading-dots"><span></span><span></span><span></span></div>
+function openHistory() {
+  historyAICache = '';
+  renderHistory();
+  elements.historyOverlay.classList.remove('hidden');
+}
+
+function closeHistory() {
+  elements.historyOverlay.classList.add('hidden');
+}
+
+function renderHistory() {
+  const days = getHistoryDays(data.tasks, data.sessions, todayDate, HISTORY_DAYS);
+  const today = days[days.length - 1];
+  elements.historyBody.innerHTML = '';
+
+  elements.historyBody.appendChild(buildHistoryToday(today));
+  elements.historyBody.appendChild(buildHistoryChart(days));
+  elements.historyBody.appendChild(buildHistoryFeed(days.slice(0, -1).reverse()));
+}
+
+function buildHistoryToday(stats) {
+  const container = document.createElement('div');
+  container.className = 'history-today';
+  container.innerHTML = `
+    <h3>Сегодня · ${escapeHTML(getDisplayDate())}</h3>
+    <div class="history-meta">${stats.closed}/${stats.total} задач · ${stats.pomodoros} 🍅 · ${stats.xp} XP</div>
+    <div class="history-closed-list" id="historyTodayClosedList"></div>
+    <button class="secondary-button history-ai-button" id="historyAIButton">AI-комментарий ✨</button>
+    <div class="history-ai-text hidden" id="historyAIText"></div>
   `;
-}
-
-function renderSummaryError(message) {
-  elements.centerPanel.innerHTML = `
-    <div class="panel-header"><h1>Итоги дня</h1></div>
-    <p style="color: var(--error); margin: 18px 0;">${escapeHTML(message)}</p>
-    <button class="secondary-button" id="backToSessionsButton">← Назад к сессиям</button>
-  `;
-  document.getElementById('backToSessionsButton').addEventListener('click', restoreSessionPanel);
-}
-
-function renderSummaryCard() {
-  const todaySessions = getTodaySessions(data.sessions, getToday());
-  const todayXP = todaySessions.reduce((sum, session) => sum + session.xp, 0);
-  const summary = {
-    dateTitle: getDisplayDate(),
-    sessionsCount: todaySessions.length,
-    xp: todayXP,
-    streak: data.stats.currentStreak,
-    aiText: aiReportText
-  };
-
-  elements.centerPanel.innerHTML = `
-    <div class="summary-card" id="summaryCard">
-      <h2>${escapeHTML(summary.dateTitle)}</h2>
-      <div class="summary-meta">🍅 ${summary.sessionsCount} сессий  ⚡ ${summary.xp} XP  🔥 ${summary.streak} дней</div>
-      <div class="summary-text">${escapeHTML(summary.aiText)}</div>
-      <div class="summary-logo">FocusForge</div>
-    </div>
-    <div class="summary-actions">
-      <button class="secondary-button" id="backToSessionsButton">← Назад к сессиям</button>
-      <button class="secondary-button" id="copySummaryButton">Скопировать текст</button>
-      <button class="primary-button" id="savePngButton">Сохранить PNG</button>
-    </div>
-  `;
-  document.getElementById('backToSessionsButton').addEventListener('click', restoreSessionPanel);
-  document.getElementById('copySummaryButton').addEventListener('click', () => copySummary(summary));
-  document.getElementById('savePngButton').addEventListener('click', saveSummaryPNG);
-}
-
-function restoreSessionPanel() {
-  elements.centerPanel.innerHTML = `
-    <div class="panel-header"><h1>Сегодня</h1></div>
-    <div class="session-list" id="sessionList"></div>
-    <button class="primary-button day-summary-button hidden" id="summaryButton">Итоги дня ✨</button>
-  `;
-  elements.sessionList = document.getElementById('sessionList');
-  elements.summaryButton = document.getElementById('summaryButton');
-  elements.summaryButton.addEventListener('click', requestSummary);
-  renderSessions();
-}
-
-async function copySummary(summary) {
-  await window.api.copyToClipboard(buildShareText(summary));
-  showToast('Текст скопирован');
-}
-
-async function saveSummaryPNG() {
-  const card = document.getElementById('summaryCard');
-  const exportCard = card.cloneNode(true);
-  exportCard.id = 'summaryExportCard';
-  exportCard.classList.add('export-card');
-  document.body.appendChild(exportCard);
-
-  try {
-    const canvas = await html2canvas(exportCard, {
-      backgroundColor: '#0a0a0f',
-      width: 1080,
-      height: 1080,
-      scale: 1
-    });
-    const result = await window.api.saveImage(canvas.toDataURL('image/png'));
-    if (result.saved) {
-      showToast('Сохранено! Поделись #FocusForge');
+  const closedList = container.querySelector('#historyTodayClosedList');
+  const closed = getDoneTodayTasks(data.tasks, todayDate);
+  if (!closed.length) {
+    closedList.textContent = 'Пока ничего не закрыто';
+  } else {
+    for (const task of closed) {
+      const row = document.createElement('div');
+      row.textContent = `✓ ${task.title}`;
+      closedList.appendChild(row);
     }
+  }
+  container.querySelector('#historyAIButton').addEventListener('click', onHistoryAIClick);
+  return container;
+}
+
+function buildHistoryChart(days) {
+  const container = document.createElement('div');
+  container.className = 'history-chart';
+  for (const day of days) {
+    const bar = document.createElement('div');
+    const percent = day.total === 0 ? 0 : (day.closed / day.total) * 100;
+    bar.className = `history-chart-bar ${day.total === 0 ? 'is-empty' : ''}`;
+    bar.style.height = `${Math.max(2, percent)}%`;
+    bar.title = `${day.date}: ${day.closed}/${day.total} задач · ${day.pomodoros} 🍅`;
+    container.appendChild(bar);
+  }
+  return container;
+}
+
+function buildHistoryFeed(days) {
+  const container = document.createElement('div');
+  container.className = 'history-feed';
+  if (!days.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty-state';
+    empty.textContent = 'Нет истории за прошлые дни';
+    container.appendChild(empty);
+    return container;
+  }
+  for (const day of days) {
+    container.appendChild(buildHistoryRow(day));
+  }
+  return container;
+}
+
+function buildHistoryRow(day) {
+  const row = document.createElement('div');
+  row.className = 'history-row';
+  row.innerHTML = `
+    <div class="history-row-head">
+      <span>${formatHistoryDate(day.date)}</span>
+      <span>${day.closed}/${day.total} задач · ${day.pomodoros} 🍅 · ${day.xp} XP</span>
+    </div>
+  `;
+  row.addEventListener('click', () => expandHistoryRow(row, day));
+  return row;
+}
+
+function expandHistoryRow(row, day) {
+  if (row.classList.contains('is-expanded')) {
+    return;
+  }
+  row.classList.add('is-expanded');
+  const closed = getDoneTodayTasks(data.tasks, day.date);
+  const list = document.createElement('div');
+  list.className = 'history-closed-list';
+  if (!closed.length) {
+    list.textContent = 'Ничего не закрыто';
+  } else {
+    for (const task of closed) {
+      const item = document.createElement('div');
+      item.textContent = `✓ ${task.title}`;
+      list.appendChild(item);
+    }
+  }
+  row.appendChild(list);
+}
+
+function formatHistoryDate(dateKey) {
+  const [y, m, d] = dateKey.split('-');
+  return new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'long' }).format(new Date(Number(y), Number(m) - 1, Number(d)));
+}
+
+async function onHistoryAIClick() {
+  const button = document.getElementById('historyAIButton');
+  const text = document.getElementById('historyAIText');
+  if (!button || !text) {
+    return;
+  }
+  if (!data.settings.apiKey && !openRouterConfig.hasEnvAPIKey) {
+    showModal(elements.apiKeyModal);
+    return;
+  }
+  if (historyAICache) {
+    text.textContent = historyAICache;
+    text.classList.remove('hidden');
+    return;
+  }
+  const closed = getDoneTodayTasks(data.tasks, todayDate);
+  const pomodoros = data.sessions.filter((s) => s.date === todayDate).length;
+  button.disabled = true;
+  button.textContent = 'Думаю…';
+  try {
+    const reply = await window.api.sendAIRequest(closed, pomodoros, data.settings.apiKey);
+    historyAICache = reply;
+    text.textContent = reply;
+    text.classList.remove('hidden');
+  } catch (error) {
+    text.textContent = error.message || 'Что-то пошло не так. Попробуй ещё раз';
+    text.classList.remove('hidden');
   } finally {
-    exportCard.remove();
+    button.disabled = false;
+    button.textContent = 'AI-комментарий ✨';
   }
 }
 
-function updateSessionXPPreview() {
-  elements.sessionXpPreview.textContent = `+${calculateSessionXP(elements.sessionDescription.value)} XP`;
+function startMidnightPoller() {
+  if (midnightPoller) {
+    clearInterval(midnightPoller);
+  }
+  midnightPoller = setInterval(() => {
+    const now = getToday();
+    if (now !== todayDate) {
+      todayDate = now;
+      activeTab = 'open';
+      render();
+    }
+  }, MIDNIGHT_POLL_INTERVAL_MS);
 }
 
 function showLevelUp(levelName) {
