@@ -43,7 +43,9 @@ function createDataStore(baseDirectory) {
   async function saveData(data) {
     await fs.mkdir(baseDirectory, { recursive: true });
     const normalizedData = mergeWithDefaults(data);
-    await fs.writeFile(dataFile, `${JSON.stringify(normalizedData, null, 2)}\n`, 'utf8');
+    const tmpFile = `${dataFile}.tmp`;
+    await fs.writeFile(tmpFile, `${JSON.stringify(normalizedData, null, 2)}\n`, 'utf8');
+    await fs.rename(tmpFile, dataFile);
     return normalizedData;
   }
 

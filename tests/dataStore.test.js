@@ -1,6 +1,9 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { mergeWithDefaults } = require('../src/main/dataStore');
+const fs = require('node:fs/promises');
+const path = require('node:path');
+const os = require('node:os');
+const { mergeWithDefaults, createDataStore } = require('../src/main/dataStore');
 
 test('mergeWithDefaults добавляет пустой tasks[] если его нет', () => {
   const legacy = {
@@ -24,4 +27,17 @@ test('mergeWithDefaults сохраняет tasks если уже есть', () =
   const merged = mergeWithDefaults(data);
   assert.equal(merged.tasks.length, 1);
   assert.equal(merged.tasks[0].id, 't-1');
+});
+
+test('saveData пишет через временный файл и rename', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ff-'));
+  const store = createDataStore(dir);
+  const data = await store.loadData();
+  data.stats.totalXP = 999;
+  await store.saveData(data);
+  const reread = await store.loadData();
+  assert.equal(reread.stats.totalXP, 999);
+  const tmpFileExists = await fs.access(path.join(dir, 'data.json.tmp')).then(() => true, () => false);
+  assert.equal(tmpFileExists, false, 'tmp файл должен быть переименован, а не оставлен');
+  await fs.rm(dir, { recursive: true, force: true });
 });
